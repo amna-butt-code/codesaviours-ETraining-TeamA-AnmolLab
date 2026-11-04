@@ -1,10 +1,11 @@
-# Brand Colors
+# Anmol Health Care Lab Brand Colors
 
-The brief requires exact colors to be sampled from Anmol Lab's official logo. The following are temporary UI development colors only, not verified official brand colors:
+The supplied letterhead and logo artwork have been used as the visual reference. The website uses an approximate sampled palette; confirm exact official HEX values with the client before final production.
 
-- Primary: `#087f8c` (temporary teal)
-- Dark: `#123047` (temporary navy)
-- Light: `#eaf6f6` (temporary mist)
-- Text: `#193448` (temporary ink)
+- Primary navy: `#252e63`
+- Deep navy: `#202957`
+- Pale blue: `#eef1fa`
+- White: `#ffffff`
+- Body text: `#33405f`
 
-Replace these values after obtaining the official logo and confirming colors with the client. All components should use shared theme tokens.
+Official supplied microscope/wordmark asset: `client/public/anmol-health-care-lab-logo.png`.

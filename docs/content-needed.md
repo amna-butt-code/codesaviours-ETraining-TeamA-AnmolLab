@@ -1,12 +1,20 @@
 # Content Needed from Client
 
-Confirm and replace every placeholder before client delivery:
-- Official logo (transparent PNG, white version, favicon 32×32 and 180×180)
-- Exact brand HEX colors
+## Already supplied and added to this project
+- Microscope logo and wordmark from the supplied letterhead (used as website logo and favicon)
+- Contact phone numbers: 0316-6474766 and 0321-6671476
+- Email: anmollaboratory@gmail.com
+- Website: www.anmolhealthcarelab.pk
+- Address: Sultani Chowk, Gulshan Muhammad Abad, Faisalabad
+- Staff names and qualifications transcribed to the About page (must be checked for spelling/credential accuracy)
+
+## Still needs confirmation before client delivery
+- Exact official brand HEX values and approved logo files (the included logo is cropped from the supplied letterhead image)
+- Opening days and hours
+- Which phone number is the official WhatsApp contact
 - Registered business name and approved About/mission text
-- All branch names, complete addresses, phone numbers, map links and operating hours
-- Official phone, WhatsApp number, email and social profiles
-- Verified test catalog: test name, code, category, sample type, preparation, fasting requirement, report time and price
+- All additional branches, map links and operating hours
+- Verified test catalog: sample type, preparation, fasting requirement, report time and actual price
 - Verified health packages and included tests/prices
 - Home sampling coverage areas, charges, available time windows and cancellation policy
 - Doctor referral onboarding process
@@ -15,4 +23,4 @@ Confirm and replace every placeholder before client delivery:
 - Approved email templates and sender account
 - Medical/legal review of all patient-facing content
 
-All seed prices and timings are samples. Do not present them as official laboratory information.
+All seeded test prices and package prices are development examples. Never present them as official prices until Anmol Lab confirms them.

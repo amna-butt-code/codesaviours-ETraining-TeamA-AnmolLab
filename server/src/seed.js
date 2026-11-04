@@ -15,7 +15,7 @@ const [admin, staff, doctor, patient] = await Promise.all([
   ["Admin","admin@anmol.test","Admin123!","admin"],["Lab Staff","staff@anmol.test","Staff123!","staff"],
   ["Demo Doctor","doctor@anmol.test","Doctor123!","doctor"],["Demo Patient","patient@anmol.test","Patient123!","patient"]
 ].map(async ([name,email,password,role]) => User.create({ name,email,password:await bcrypt.hash(password,12),role })));
-const branches = await Branch.insertMany([{name:"Main Branch",address:"[Branch address to be confirmed]",phone:"[Phone to be confirmed]",openingHours:"[Timings to be confirmed]"}]);
+const branches = await Branch.insertMany([{name:"Anmol Health Care Lab – Main Branch",address:"Sultani Chowk, Gulshan Muhammad Abad, Faisalabad",phone:"0316-6474766 / 0321-6671476",openingHours:"Please contact the laboratory to confirm current timings"}]);
 const byCode = Object.fromEntries(testDocs.map(t => [t.code,t._id]));
 await LabPackage.create([
  {name:"Sample Full Body Checkup",description:"Illustrative package; confirm included tests and price with the lab.",tests:[byCode.CBC,byCode.LFT,byCode.RFT,byCode.LIP],price:4500,samplePrice:true},

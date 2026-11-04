@@ -63,5 +63,8 @@ The repository includes:
 
 The feature branches are separate so they can be reviewed independently. The integration branch contains both parts for local testing. Push each branch separately and create PRs according to the team's agreed review/base-branch process.
 
+## Supplied client branding
+The supplied letterhead logo and confirmed contact details are included. See `docs/client-information.md` for the transcribed information and remaining verification checklist. Test prices and packages remain sample data until confirmed.
+
 ## Client information still needed
-See `docs/content-needed.md` for the complete checklist.
+See `docs/content-needed.md` and `docs/client-information.md` for the complete checklist.
