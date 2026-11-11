@@ -1,0 +1,93 @@
+{
+  "info": {
+    "name": "Anmol Lab API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000/api"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/health"
+      }
+    },
+    {
+      "name": "Register patient",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"name\":\"Demo Patient\",\"email\":\"patient2@example.test\",\"password\":\"Patient123!\",\"phone\":\"03000000000\"}"
+        },
+        "url": "{{baseUrl}}/auth/register"
+      }
+    },
+    {
+      "name": "Login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"email\":\"admin@anmol.test\",\"password\":\"Admin123!\"}"
+        },
+        "url": "{{baseUrl}}/auth/login"
+      }
+    },
+    {
+      "name": "List tests",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/tests"
+      }
+    },
+    {
+      "name": "List packages",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/packages"
+      }
+    },
+    {
+      "name": "List branches",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/branches"
+      }
+    },
+    {
+      "name": "Contact message",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"name\":\"Demo\",\"email\":\"demo@example.test\",\"message\":\"Please share lab timings.\"}"
+        },
+        "url": "{{baseUrl}}/messages"
+      }
+    }
+  ]
+}
