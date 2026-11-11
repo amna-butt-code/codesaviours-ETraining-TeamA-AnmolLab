@@ -49,9 +49,1772 @@ function Book(){const {user}=useAuth(),nav=useNavigate(),[tests,setTests]=useSta
 function PortalShell({title,children}){const {user,loading}=useAuth();if(loading)return <GenericPage title="Loading account..."/>;if(!user)return <GenericPage title="Please log in"><Link className="btn btn-primary" to="/login">Login</Link></GenericPage>;return <main className="page"><div className="container"><SectionTitle eyebrow={`${user.role.toUpperCase()} PORTAL`} title={title}/>{children}</div></main>}
 function PatientPortal(){const [bookings,setBookings]=useState([]),[reports,setReports]=useState([]);useEffect(()=>{api.get("/bookings/mine").then(r=>setBookings(r.data.bookings)).catch(()=>{});api.get("/reports/mine").then(r=>setReports(r.data.reports)).catch(()=>{});},[]);return <PortalShell title="Your health activity"><div className="dashboard-grid"><div className="panel"><h3>My bookings</h3>{bookings.map(b=><div className="list-row" key={b._id}><div><b>{b.bookingCode}</b><small>{new Date(b.slotDate).toLocaleDateString()} · {b.collectionType}</small></div><span className="pill">{b.status}</span></div>)}{!bookings.length&&<p className="muted">No bookings yet.</p>}</div><div className="panel"><h3>My reports</h3>{reports.map(r=><div className="list-row" key={r._id}><span>{r.originalName||"Lab report"}</span><a href={`${import.meta.env.VITE_API_URL||"http://localhost:5000/api"}/reports/${r._id}/download`} target="_blank" rel="noreferrer">Download</a></div>)}{!reports.length&&<p className="muted">No reports available yet.</p>}</div></div></PortalShell>}
 function Reports(){return <PortalShell title="Download your report"><div className="prose"><p>Sign in to your patient portal to see reports attached to your account. Reports are private and access is checked by the server.</p><Link className="btn btn-primary" to="/portal">Open patient portal</Link></div></PortalShell>}
-function Staff(){const [bookings,setBookings]=useState([]);const refresh=()=>api.get("/bookings").then(r=>setBookings(r.data.bookings)).catch(()=>{});useEffect(()=>{refresh();},[]);return <PortalShell title="Today's bookings and collections"><div className="panel">{bookings.map(b=><div className="list-row" key={b._id}><div><b>{b.bookingCode} · {b.patientName}</b><small>{b.slotTime} · {b.collectionType}</small></div><select value={b.status} onChange={async e=>{await api.patch(`/bookings/${b._id}/status`,{status:e.target.value});refresh();}}>{["Booked","Sample collected","Processing","Report ready","Completed","Cancelled"].map(s=><option key={s}>{s}</option>)}</select></div>)}</div></PortalShell>}
-function Admin(){const [summary,setSummary]=useState(null),[tests,setTests]=useState([]);useEffect(()=>{api.get("/admin/summary").then(r=>setSummary(r.data)).catch(()=>{});api.get("/tests").then(r=>setTests(r.data.tests)).catch(()=>{});},[]);return <PortalShell title="Laboratory administration"><div className="stats">{summary&&[["Bookings",summary.bookings],["Tests",summary.tests],["Reports",summary.reports],["Revenue estimate",money(summary.revenueEstimate)]].map(([k,v])=><div className="stat" key={k}><small>{k}</small><b>{v}</b></div>)}</div><div className="panel"><h3>Test catalog management</h3><p className="muted">Current catalogue. Admin API supports adding, updating and deactivating tests.</p>{tests.slice(0,12).map(t=><div className="list-row" key={t._id}><span>{t.name}</span><b>{money(t.price)}</b></div>)}</div></PortalShell>}
-function Doctor(){return <PortalShell title="Referred patient reports"><div className="panel"><p>Doctor report access is restricted to patients assigned to the doctor's referral list. Ask the administrator to configure referral relationships.</p></div></PortalShell>}
-function AIChat(){const {user}=useAuth();const [message,setMessage]=useState(""),[answer,setAnswer]=useState("");const send=async e=>{e.preventDefault();if(!user)return setAnswer("Please log in to use the assistant.");try{const r=await api.post("/ai/chat",{message});setAnswer(r.data.reply);}catch{setAnswer("The assistant is temporarily unavailable.");}};return <div className="chat-widget"><details><summary><MessageCircle/> Ask Anmol AI</summary><form onSubmit={send}><textarea value={message} onChange={e=>setMessage(e.target.value)} placeholder="Ask about tests, preparation or booking..." required/><button className="btn btn-primary small">Send</button></form>{answer&&<p>{answer}</p>}<small>This assistant does not give medical advice.</small></details></div>}
+
+function Staff() {
+  const [bookings, setBookings] = useState([]);
+  const [uploadingBooking, setUploadingBooking] = useState(null);
+
+  const refresh = () =>
+    api.get("/bookings")
+      .then(r => setBookings(r.data.bookings))
+      .catch(error => console.error("Could not load bookings:", error));
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  const uploadReport = async (e, bookingId) => {
+    e.preventDefault();
+
+    const form = e.currentTarget;
+    const formData = new FormData(form);
+    const file = formData.get("report");
+
+    if (!file || file.size === 0) {
+      alert("Please select a report file.");
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert("File size must not exceed 5 MB.");
+      return;
+    }
+
+    try {
+      setUploadingBooking(bookingId);
+
+      await api.post(`/reports/${bookingId}`, formData);
+
+      alert("Report uploaded successfully!");
+
+      form.reset();
+      await refresh();
+
+    } catch (error) {
+      alert(
+        error.response?.data?.message ||
+        "Could not upload report."
+      );
+    } finally {
+      setUploadingBooking(null);
+    }
+  };
+
+  return (
+    <PortalShell title="Today's bookings and collections">
+      <div className="panel staff-dashboard">
+
+        {bookings.length === 0 ? (
+          <p>No bookings available.</p>
+        ) : (
+          bookings.map(b => (
+            <div className="list-row" key={b._id}>
+
+              <div>
+                <b>{b.bookingCode} · {b.patientName}</b>
+                <small>{b.slotTime} · {b.collectionType}</small>
+              </div>
+
+              <select
+                value={b.status}
+                onChange={async e => {
+                  try {
+                    await api.patch(
+                      `/bookings/${b._id}/status`,
+                      { status: e.target.value }
+                    );
+
+                    await refresh();
+                  } catch (error) {
+                    alert(
+                      error.response?.data?.message ||
+                      "Could not update booking status."
+                    );
+                  }
+                }}
+              >
+                {[
+                  "Booked",
+                  "Sample collected",
+                  "Processing",
+                  "Report ready",
+                  "Completed",
+                  "Cancelled"
+                ].map(s => (
+                  <option key={s}>{s}</option>
+                ))}
+              </select>
+
+              {b.status === "Processing" && (
+                <form
+                  className="staff-report-upload"
+                  onSubmit={e => uploadReport(e, b._id)}
+                >
+                  <label>Upload Patient Report</label>
+
+                  <input
+                    type="file"
+                    name="report"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    required
+                  />
+
+                  <button
+                    type="submit"
+                    disabled={uploadingBooking === b._id}
+                  >
+                    {uploadingBooking === b._id
+                      ? "Uploading..."
+                      : "Upload Report"}
+                  </button>
+
+                  <small>
+                    PDF, JPG or PNG · Maximum 5 MB
+                  </small>
+                </form>
+              )}
+
+            </div>
+          ))
+        )}
+
+      </div>
+    </PortalShell>
+  );
+}
+
+
+function Admin() {
+  const emptyTestForm = {
+    name: "",
+    code: "",
+    category: "",
+    sampleType: "Blood",
+    preparation: "",
+    fastingRequired: false,
+    reportTime: "Within 24 hours (sample estimate)",
+    price: "",
+    salePrice: "",
+    samplePrice: true
+  };
+
+  const [summary, setSummary] = useState(null);
+  const [tests, setTests] = useState([]);
+  const [packages, setPackages] = useState([]);
+
+  const [branches, setBranches] = useState([]);
+  
+const [faqs, setFaqs] = useState([]);
+
+const emptyFaqForm = {
+  question: "",
+  answer: ""
+};
+
+const emptyPostForm = {
+  title: "",
+  slug: "",
+  excerpt: "",
+  body: "",
+  published: false
+};
+
+const [posts, setPosts] = useState([]);
+const [postForm, setPostForm] = useState(emptyPostForm);
+const [editingPost, setEditingPost] = useState(null);
+const [savingPost, setSavingPost] = useState(false);
+// Doctor-Patient Referral Management
+const [doctors, setDoctors] = useState([]);
+const [referralPatients, setReferralPatients] = useState([]);
+const [selectedDoctor, setSelectedDoctor] = useState("");
+const [selectedPatient, setSelectedPatient] = useState("");
+const [savingReferral, setSavingReferral] = useState(false);
+
+
+const [faqForm, setFaqForm] = useState(emptyFaqForm);
+const [editingFaq, setEditingFaq] = useState(null);
+const [savingFaq, setSavingFaq] = useState(false);
+
+
+const emptyBranchForm = {
+  name: "",
+  address: "",
+  phone: "",
+  openingHours: "",
+  mapUrl: ""
+};
+
+const [branchForm, setBranchForm] = useState(emptyBranchForm);
+const [editingBranch, setEditingBranch] = useState(null);
+const [savingBranch, setSavingBranch] = useState(false);
+
+const emptyPackageForm = {
+  name: "",
+  description: "",
+  tests: [],
+  price: "",
+  samplePrice: true
+};
+
+const [packageForm, setPackageForm] = useState(emptyPackageForm);
+const [editingPackage, setEditingPackage] = useState(null);
+const [savingPackage, setSavingPackage] = useState(false);
+  const [bookings, setBookings] = useState([]);
+  const [reportFiles, setReportFiles] = useState({});
+  const [uploadingBooking, setUploadingBooking] = useState(null);
+
+  const [testForm, setTestForm] = useState(emptyTestForm);
+  const [editingTest, setEditingTest] = useState(null);
+  const [savingTest, setSavingTest] = useState(false);
+  const [testSearch, setTestSearch] = useState("");
+const [testCategory, setTestCategory] = useState("All");
+
+  const refreshBookings = async () => {
+    try {
+      const r = await api.get("/bookings");
+      setBookings(r.data.bookings);
+    } catch (error) {
+      console.error("Could not load bookings:", error);
+    }
+  };
+
+  const refreshTests = async () => {
+    try {
+      const r = await api.get("/tests");
+      setTests(r.data.tests);
+    } catch (error) {
+      console.error("Could not load tests:", error);
+    }
+  };
+  const refreshPackages = async () => {
+  try {
+    const r = await api.get("/admin/packages");
+    setPackages(r.data.packages);
+  } catch (error) {
+    console.error("Could not load packages:", error);
+  }
+};
+const refreshBranches = async () => {
+  try {
+    const r = await api.get("/admin/branches");
+    setBranches(r.data.branches);
+  } catch (error) {
+    console.error("Could not load branches:", error);
+  }
+};
+
+const refreshFaqs = async () => {
+  try {
+    const r = await api.get("/admin/faqs");
+    setFaqs(r.data.faqs);
+  } catch (error) {
+    console.error("Could not load FAQs:", error);
+  }
+};
+
+const refreshPosts = async () => {
+  try {
+    const r = await api.get("/admin/posts");
+    setPosts(r.data.posts);
+  } catch (error) {
+    console.error("Could not load posts:", error);
+  }
+};
+const refreshReferrals = async () => {
+  try {
+    const r = await api.get("/admin/referrals");
+
+    setDoctors(r.data.doctors || []);
+    setReferralPatients(r.data.patients || []);
+  } catch (error) {
+    console.error("Could not load referrals:", error);
+  }
+};
+const assignPatient = async (e) => {
+  e.preventDefault();
+
+  if (!selectedDoctor || !selectedPatient) {
+    alert("Please select both a doctor and a patient.");
+    return;
+  }
+
+  try {
+    setSavingReferral(true);
+
+    await api.post("/admin/referrals", {
+      doctorId: selectedDoctor,
+      patientId: selectedPatient
+    });
+
+    alert("Patient assigned successfully!");
+
+    setSelectedPatient("");
+    await refreshReferrals();
+  } catch (error) {
+    alert(error.response?.data?.message || "Could not assign patient.");
+  } finally {
+    setSavingReferral(false);
+  }
+};
+
+const removeReferral = async (doctorId, patientId) => {
+  if (!window.confirm("Are you sure you want to remove this referral?")) {
+    return;
+  }
+
+  try {
+    await api.delete(`/admin/referrals/${doctorId}/${patientId}`);
+
+    alert("Referral removed successfully!");
+    await refreshReferrals();
+  } catch (error) {
+    alert(error.response?.data?.message || "Could not remove referral.");
+  }
+};
+
+const handlePostChange = (e) => {
+  const { name, value, type, checked } = e.target;
+
+  setPostForm(prev => ({
+    ...prev,
+    [name]: type === "checkbox" ? checked : value
+  }));
+};
+
+const savePost = async (e) => {
+  e.preventDefault();
+
+  try {
+    setSavingPost(true);
+
+    if (editingPost) {
+      await api.patch(`/admin/posts/${editingPost}`, postForm);
+      alert("Post updated successfully!");
+    } else {
+      await api.post("/admin/posts", postForm);
+      alert("New post added successfully!");
+    }
+
+    setPostForm(emptyPostForm);
+    setEditingPost(null);
+    await refreshPosts();
+  } catch (error) {
+    alert(error.response?.data?.message || "Could not save post.");
+  } finally {
+    setSavingPost(false);
+  }
+};
+
+const startEditingPost = (post) => {
+  setEditingPost(post._id);
+
+  setPostForm({
+    title: post.title || "",
+    slug: post.slug || "",
+    excerpt: post.excerpt || "",
+    body: post.body || "",
+    published: post.published ?? false
+  });
+};
+
+const cancelPostEditing = () => {
+  setEditingPost(null);
+  setPostForm(emptyPostForm);
+};
+
+const unpublishPost = async (postId) => {
+  if (!window.confirm("Are you sure you want to unpublish this post?")) {
+    return;
+  }
+
+  try {
+    await api.delete(`/admin/posts/${postId}`);
+    alert("Post unpublished successfully!");
+    await refreshPosts();
+  } catch (error) {
+    alert(error.response?.data?.message || "Could not unpublish post.");
+  }
+};
+
+
+
+const handleFaqChange = (e) => {
+  const { name, value } = e.target;
+
+  setFaqForm(prev => ({
+    ...prev,
+    [name]: value
+  }));
+};
+
+const saveFaq = async (e) => {
+  e.preventDefault();
+
+  try {
+    setSavingFaq(true);
+
+    if (editingFaq) {
+      await api.patch(`/admin/faqs/${editingFaq}`, faqForm);
+      alert("FAQ updated successfully!");
+    } else {
+      await api.post("/admin/faqs", faqForm);
+      alert("New FAQ added successfully!");
+    }
+
+    setFaqForm(emptyFaqForm);
+    setEditingFaq(null);
+
+    await refreshFaqs();
+
+  } catch (error) {
+    alert(error.response?.data?.message || "Could not save FAQ.");
+  } finally {
+    setSavingFaq(false);
+  }
+};
+
+const startEditingFaq = (faq) => {
+  setEditingFaq(faq._id);
+
+  setFaqForm({
+    question: faq.question || "",
+    answer: faq.answer || ""
+  });
+};
+
+const cancelFaqEditing = () => {
+  setEditingFaq(null);
+  setFaqForm(emptyFaqForm);
+};
+
+const deactivateFaq = async (faqId) => {
+  if (!window.confirm("Are you sure you want to deactivate this FAQ?")) {
+    return;
+  }
+
+  try {
+    await api.delete(`/admin/faqs/${faqId}`);
+    alert("FAQ deactivated successfully!");
+    await refreshFaqs();
+  } catch (error) {
+    alert(error.response?.data?.message || "Could not deactivate FAQ.");
+  }
+};
+
+
+
+
+const handleBranchChange = (e) => {
+  const { name, value } = e.target;
+
+  setBranchForm(prev => ({
+    ...prev,
+    [name]: value
+  }));
+};
+
+const saveBranch = async (e) => {
+  e.preventDefault();
+
+  try {
+    setSavingBranch(true);
+
+    if (editingBranch) {
+      await api.patch(`/admin/branches/${editingBranch}`, branchForm);
+      alert("Branch updated successfully!");
+    } else {
+      await api.post("/admin/branches", branchForm);
+      alert("New branch added successfully!");
+    }
+
+    setBranchForm(emptyBranchForm);
+    setEditingBranch(null);
+
+    await refreshBranches();
+
+  } catch (error) {
+    alert(error.response?.data?.message || "Could not save branch.");
+  } finally {
+    setSavingBranch(false);
+  }
+};
+
+const startEditingBranch = (branch) => {
+  setEditingBranch(branch._id);
+
+  setBranchForm({
+    name: branch.name || "",
+    address: branch.address || "",
+    phone: branch.phone || "",
+    openingHours: branch.openingHours || "",
+    mapUrl: branch.mapUrl || ""
+  });
+};
+
+const cancelBranchEditing = () => {
+  setEditingBranch(null);
+  setBranchForm(emptyBranchForm);
+};
+
+const deactivateBranch = async (branchId) => {
+  if (!window.confirm("Are you sure you want to deactivate this branch?")) {
+    return;
+  }
+
+  try {
+    await api.delete(`/admin/branches/${branchId}`);
+    alert("Branch deactivated successfully!");
+    await refreshBranches();
+  } catch (error) {
+    alert(error.response?.data?.message || "Could not deactivate branch.");
+  }
+};
+
+
+
+  const refreshSummary = async () => {
+    try {
+      const r = await api.get("/admin/summary");
+      setSummary(r.data);
+    } catch (error) {
+      console.error("Could not load summary:", error);
+    }
+  };
+
+  useEffect(() => {
+  refreshSummary();
+  refreshTests();
+  refreshBookings();
+  refreshPackages();
+  refreshBranches();
+  refreshFaqs();
+  refreshPosts();
+  refreshReferrals();
+}, []);
+
+  const updateStatus = async (bookingId, status) => {
+    try {
+      await api.patch(`/bookings/${bookingId}/status`, { status });
+      await refreshBookings();
+    } catch (error) {
+      alert(error.response?.data?.message || "Could not update booking status.");
+    }
+  };
+
+  const uploadReport = async (bookingId) => {
+    const file = reportFiles[bookingId];
+
+    if (!file) {
+      alert("Please select a report file first.");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("report", file);
+
+    try {
+      setUploadingBooking(bookingId);
+
+      const response = await api.post(`/reports/${bookingId}`, formData);
+
+      alert(response.data.message || "Report uploaded successfully!");
+
+      setReportFiles(prev => ({
+        ...prev,
+        [bookingId]: null
+      }));
+
+      await refreshBookings();
+      await refreshSummary();
+    } catch (error) {
+      alert(error.response?.data?.message || "Report upload failed.");
+    } finally {
+      setUploadingBooking(null);
+    }
+  };
+
+  const handleTestChange = (e) => {
+    const { name, value, type, checked } = e.target;
+
+    setTestForm(prev => ({
+      ...prev,
+      [name]: type === "checkbox" ? checked : value
+    }));
+  };
+
+  const saveTest = async (e) => {
+    e.preventDefault();
+
+    try {
+      setSavingTest(true);
+
+      const data = {
+        ...testForm,
+        price: Number(testForm.price),
+        salePrice: testForm.salePrice === ""
+          ? undefined
+          : Number(testForm.salePrice)
+      };
+
+      if (editingTest) {
+        await api.patch(`/admin/tests/${editingTest}`, data);
+        alert("Test updated successfully!");
+      } else {
+        await api.post("/admin/tests", data);
+        alert("New test added successfully!");
+      }
+
+      setTestForm(emptyTestForm);
+      setEditingTest(null);
+
+      await refreshTests();
+      await refreshSummary();
+    } catch (error) {
+      alert(error.response?.data?.message || "Could not save test.");
+    } finally {
+      setSavingTest(false);
+    }
+  };
+
+  const startEditing = (test) => {
+    setEditingTest(test._id);
+
+    setTestForm({
+      name: test.name || "",
+      code: test.code || "",
+      category: test.category || "",
+      sampleType: test.sampleType || "Blood",
+      preparation: test.preparation || "",
+      fastingRequired: test.fastingRequired || false,
+      reportTime: test.reportTime || "",
+      price: test.price ?? "",
+      salePrice: test.salePrice ?? "",
+      samplePrice: test.samplePrice ?? true
+    });
+  };
+
+  const cancelEditing = () => {
+    setEditingTest(null);
+    setTestForm(emptyTestForm);
+  };
+
+  const deactivateTest = async (testId) => {
+  if (!window.confirm("Are you sure you want to deactivate this test?")) {
+    return;
+  }
+
+  try {
+    await api.delete(`/admin/tests/${testId}`);
+    alert("Test deactivated successfully!");
+    await refreshTests();
+  } catch (error) {
+    alert(error.response?.data?.message || "Could not deactivate test.");
+  }
+};
+const handlePackageChange = (e) => {
+  const { name, value } = e.target;
+
+  setPackageForm(prev => ({
+    ...prev,
+    [name]: value
+  }));
+};
+
+const togglePackageTest = (testId) => {
+  setPackageForm(prev => ({
+    ...prev,
+    tests: prev.tests.includes(testId)
+      ? prev.tests.filter(id => id !== testId)
+      : [...prev.tests, testId]
+  }));
+};
+const savePackage = async (e) => {
+  e.preventDefault();
+
+  if (packageForm.tests.length === 0) {
+    alert("Please select at least one test for this package.");
+    return;
+  }
+
+  try {
+    setSavingPackage(true);
+
+    const data = {
+      ...packageForm,
+      price: Number(packageForm.price)
+    };
+
+    if (editingPackage) {
+      await api.patch(`/admin/packages/${editingPackage}`, data);
+      alert("Package updated successfully!");
+    } else {
+      await api.post("/admin/packages", data);
+      alert("New package added successfully!");
+    }
+
+    setPackageForm(emptyPackageForm);
+    setEditingPackage(null);
+
+    await refreshPackages();
+    await refreshSummary();
+  } catch (error) {
+    alert(error.response?.data?.message || "Could not save package.");
+  } finally {
+    setSavingPackage(false);
+  }
+};
+const startEditingPackage = (pkg) => {
+  setEditingPackage(pkg._id);
+
+  setPackageForm({
+    name: pkg.name || "",
+    description: pkg.description || "",
+    tests: pkg.tests?.map(test =>
+      typeof test === "string" ? test : test._id
+    ) || [],
+    price: pkg.price ?? "",
+    samplePrice: pkg.samplePrice ?? true
+  });
+};
+
+const cancelPackageEditing = () => {
+  setEditingPackage(null);
+  setPackageForm(emptyPackageForm);
+};
+const deactivatePackage = async (packageId) => {
+  if (!window.confirm("Are you sure you want to deactivate this package?")) {
+    return;
+  }
+
+  try {
+    await api.delete(`/admin/packages/${packageId}`);
+    alert("Package deactivated successfully!");
+    await refreshPackages();
+  } catch (error) {
+    alert(error.response?.data?.message || "Could not deactivate package.");
+  }
+};
+const categories = [
+  "All",
+  ...new Set(tests.map(test => test.category).filter(Boolean))
+];
+
+const filteredTests = tests.filter(test => {
+  const search = testSearch.toLowerCase();
+
+  const matchesSearch =
+    (test.name || "").toLowerCase().includes(search) ||
+    (test.code || "").toLowerCase().includes(search);
+
+  const matchesCategory =
+    testCategory === "All" || test.category === testCategory;
+
+  return matchesSearch && matchesCategory;
+});
+  return (
+    <PortalShell title="Laboratory administration">
+
+      <div className="stats">
+        {summary && [
+          ["Bookings", summary.bookings],
+          ["Tests", summary.tests],
+          ["Reports", summary.reports],
+          ["Revenue estimate", money(summary.revenueEstimate)]
+        ].map(([k, v]) => (
+          <div className="stat" key={k}>
+            <small>{k}</small>
+            <b>{v}</b>
+          </div>
+        ))}
+      </div>
+
+      {/* Booking Management */}
+
+      <div className="panel test-management">
+        <h3>All patient bookings</h3>
+        <p className="muted">
+          View booking details and update booking status.
+        </p>
+
+        {bookings.length === 0 ? (
+          <p>No bookings found.</p>
+        ) : (
+          bookings.map(b => (
+            <div className="list-row" key={b._id}>
+              <div>
+                <b>
+                  {b.bookingCode} · {b.patientName || b.patient?.name || "Patient"}
+                </b>
+
+                <small>
+                  Phone: {b.patientPhone || b.patient?.phone || "Not provided"}
+                </small>
+
+                <small>
+                  Date: {b.slotDate ? new Date(b.slotDate).toLocaleDateString() : "Not set"}
+                  {" · "}
+                  Time: {b.slotTime || "Not set"}
+                </small>
+
+                <small>
+                  Collection: {b.collectionType === "home" ? "Home collection" : "Branch"}
+                  {b.branch?.name ? ` · ${b.branch.name}` : ""}
+                </small>
+
+                {b.address && <small>Address: {b.address}</small>}
+
+                <small>
+                  Tests: {b.tests?.map(t => t.name).join(", ") || "None"}
+                </small>
+
+                <small>
+                  Packages: {b.packages?.map(p => p.name).join(", ") || "None"}
+                </small>
+
+                <small>Total: {money(b.total)}</small>
+
+                <div>
+                  <label>Upload patient report:</label>
+
+                  <input
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    onChange={e =>
+                      setReportFiles(prev => ({
+                        ...prev,
+                        [b._id]: e.target.files?.[0] || null
+                      }))
+                    }
+                  />
+
+                  <button
+                    type="button"
+                    disabled={uploadingBooking === b._id}
+                    onClick={() => uploadReport(b._id)}
+                  >
+                    {uploadingBooking === b._id ? "Uploading..." : "Upload Report"}
+                  </button>
+                </div>
+              </div>
+
+              <select
+                value={b.status}
+                onChange={e => updateStatus(b._id, e.target.value)}
+              >
+                {[
+                  "Booked",
+                  "Sample collected",
+                  "Processing",
+                  "Report ready",
+                  "Completed",
+                  "Cancelled"
+                ].map(status => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Test Management */}
+
+      <div className="panel test-management">
+        <h3>Test catalog management</h3>
+        <p className="muted">
+          Add new laboratory tests or update existing tests.
+        </p>
+
+        <form onSubmit={saveTest}>
+
+          <h4>{editingTest ? "Edit test" : "Add new test"}</h4>
+
+          <label>Test name</label>
+          <input
+            name="name"
+            value={testForm.name}
+            onChange={handleTestChange}
+            placeholder="e.g. Complete Blood Count"
+            required
+          />
+
+          <label>Test code</label>
+          <input
+            name="code"
+            value={testForm.code}
+            onChange={handleTestChange}
+            placeholder="e.g. CBC001"
+            required
+          />
+
+          <label>Category</label>
+          <input
+            name="category"
+            value={testForm.category}
+            onChange={handleTestChange}
+            placeholder="e.g. Blood Test"
+            required
+          />
+
+          <label>Sample type</label>
+          <input
+            name="sampleType"
+            value={testForm.sampleType}
+            onChange={handleTestChange}
+            placeholder="e.g. Blood"
+          />
+
+          <label>Preparation instructions</label>
+          <textarea
+            name="preparation"
+            value={testForm.preparation}
+            onChange={handleTestChange}
+            placeholder="Enter preparation instructions"
+          />
+
+          <label>
+            <input
+              type="checkbox"
+              name="fastingRequired"
+              checked={testForm.fastingRequired}
+              onChange={handleTestChange}
+            />
+            Fasting required
+          </label>
+
+          <label>Report time</label>
+          <input
+            name="reportTime"
+            value={testForm.reportTime}
+            onChange={handleTestChange}
+            placeholder="e.g. Within 24 hours"
+          />
+
+          <label>Original price (Rs.)</label>
+          <input
+            type="number"
+            name="price"
+            value={testForm.price}
+            onChange={handleTestChange}
+            min="0"
+            required
+          />
+
+          <label>Sale price (Rs.)</label>
+          <input
+            type="number"
+            name="salePrice"
+            value={testForm.salePrice}
+            onChange={handleTestChange}
+            min="0"
+            placeholder="Optional"
+          />
+
+          <label>
+            <input
+              type="checkbox"
+              name="samplePrice"
+              checked={testForm.samplePrice}
+              onChange={handleTestChange}
+            />
+            Sample price
+          </label>
+
+          <div>
+            <button type="submit" disabled={savingTest}>
+              {savingTest
+                ? "Saving..."
+                : editingTest
+                  ? "Update Test"
+                  : "Add Test"}
+            </button>
+
+            {editingTest && (
+              <button type="button" onClick={cancelEditing}>
+                Cancel
+              </button>
+            )}
+          </div>
+        </form>
+      </div>
+
+      
+{/* Existing Test List */}
+
+<div className="panel test-management">
+  <h3>Existing laboratory tests ({filteredTests.length})</h3>
+
+  <p className="muted">
+    Search and filter your laboratory tests.
+  </p>
+
+  {/* Search and category filters */}
+
+  <div className="test-filters">
+    <input
+      type="text"
+      placeholder="Search by test name or code..."
+      value={testSearch}
+      onChange={e => setTestSearch(e.target.value)}
+    />
+
+    <select
+      value={testCategory}
+      onChange={e => setTestCategory(e.target.value)}
+    >
+      {categories.map(category => (
+        <option key={category} value={category}>
+          {category}
+        </option>
+      ))}
+    </select>
+
+    <button
+      type="button"
+      onClick={() => {
+        setTestSearch("");
+        setTestCategory("All");
+      }}
+    >
+      Clear Filters
+    </button>
+  </div>
+
+  {/* Filtered tests */}
+
+  {filteredTests.length === 0 ? (
+    <p>No matching tests found.</p>
+  ) : (
+    filteredTests.map(t => (
+      <div className="list-row" key={t._id}>
+        <div>
+          <b>{t.name}</b>
+
+          <small>Code: {t.code} · Category: {t.category}</small>
+          <small>Sample: {t.sampleType}</small>
+
+          <small>
+            Price: {money(t.price)}
+            {t.salePrice != null ? ` · Sale: ${money(t.salePrice)}` : ""}
+          </small>
+
+          <small>
+            Fasting: {t.fastingRequired ? "Required" : "Not required"}
+          </small>
+
+          <button
+            type="button"
+            onClick={() => startEditing(t)}
+          >
+            Edit
+          </button>
+
+          <button
+            type="button"
+            onClick={() => deactivateTest(t._id)}
+          >
+            Deactivate
+          </button>
+        </div>
+      </div>
+    ))
+  )}
+</div>
+{/* Package Management */}
+
+<div className="panel test-management">
+  <h3>Package Management</h3>
+  <p className="muted">
+    Create packages by selecting laboratory tests and setting a package price.
+  </p>
+
+  <form onSubmit={savePackage}>
+    <h4>{editingPackage ? "Edit Package" : "Add New Package"}</h4>
+
+    <label>Package name</label>
+    <input
+      name="name"
+      value={packageForm.name}
+      onChange={handlePackageChange}
+      placeholder="e.g. Complete Health Package"
+      required
+    />
+
+    <label>Description</label>
+    <textarea
+      name="description"
+      value={packageForm.description}
+      onChange={handlePackageChange}
+      placeholder="Enter package description"
+    />
+
+    <label>Package price (Rs.)</label>
+    <input
+      type="number"
+      name="price"
+      value={packageForm.price}
+      onChange={handlePackageChange}
+      min="0"
+      required
+    />
+
+    <label>
+      <input
+        type="checkbox"
+        checked={packageForm.samplePrice}
+        onChange={e =>
+          setPackageForm(prev => ({
+            ...prev,
+            samplePrice: e.target.checked
+          }))
+        }
+      />
+      Sample price
+    </label>
+
+    <h4>Select tests for this package</h4>
+
+    {tests.length === 0 ? (
+      <p>No active tests available.</p>
+    ) : (
+      tests.map(test => (
+        <label key={test._id} style={{ display: "block" }}>
+          <input
+            type="checkbox"
+            checked={packageForm.tests.includes(test._id)}
+            onChange={() => togglePackageTest(test._id)}
+          />
+          {test.name} — {money(test.price)}
+        </label>
+      ))
+    )}
+
+    <button type="submit" disabled={savingPackage}>
+      {savingPackage
+        ? "Saving..."
+        : editingPackage
+          ? "Update Package"
+          : "Add Package"}
+    </button>
+
+    {editingPackage && (
+      <button type="button" onClick={cancelPackageEditing}>
+        Cancel
+      </button>
+    )}
+  </form>
+
+  <hr />
+
+  <h4>Existing Packages ({packages.length})</h4>
+
+  {packages.length === 0 ? (
+    <p>No packages found.</p>
+  ) : (
+    packages.map(pkg => (
+      <div className="list-row" key={pkg._id}>
+        <div>
+          <b>{pkg.name}</b>
+
+          <small>{pkg.description || "No description"}</small>
+
+          <small>
+            Price: {money(pkg.price)}
+          </small>
+
+          <small>
+            Tests: {pkg.tests?.map(test => test.name).join(", ") || "None"}
+          </small>
+
+          <small>
+            Status: {pkg.active ? "Active" : "Inactive"}
+          </small>
+
+          {pkg.active && (
+            <>
+              <button
+                type="button"
+                onClick={() => startEditingPackage(pkg)}
+              >
+                Edit
+              </button>
+
+              <button
+                type="button"
+                onClick={() => deactivatePackage(pkg._id)}
+              >
+                Deactivate
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    ))
+  )}
+</div>
+
+
+<div className="panel branch-management">
+  <h2>Branch Management</h2>
+
+  <form onSubmit={saveBranch}>
+    <h3>{editingBranch ? "Update Branch" : "Add New Branch"}</h3>
+
+    <input
+      name="name"
+      placeholder="Branch Name"
+      value={branchForm.name}
+      onChange={handleBranchChange}
+      required
+    />
+
+    <input
+      name="address"
+      placeholder="Branch Address"
+      value={branchForm.address}
+      onChange={handleBranchChange}
+    />
+
+    <input
+      name="phone"
+      placeholder="Phone Number"
+      value={branchForm.phone}
+      onChange={handleBranchChange}
+    />
+
+    <input
+      name="openingHours"
+      placeholder="Opening Hours"
+      value={branchForm.openingHours}
+      onChange={handleBranchChange}
+    />
+
+    <input
+      name="mapUrl"
+      placeholder="Google Maps URL"
+      value={branchForm.mapUrl}
+      onChange={handleBranchChange}
+    />
+
+    <button type="submit" disabled={savingBranch}>
+      {savingBranch
+        ? "Saving..."
+        : editingBranch
+        ? "Update Branch"
+        : "Add Branch"}
+    </button>
+
+    {editingBranch && (
+      <button type="button" onClick={cancelBranchEditing}>
+        Cancel
+      </button>
+    )}
+  </form>
+
+  <hr />
+
+  <h3>Existing Branches</h3>
+
+  {branches.length === 0 ? (
+    <p>No branches found.</p>
+  ) : (
+    branches.map(branch => (
+      <div className="list-row" key={branch._id}>
+        <div>
+          <b>{branch.name}</b>
+
+          <small>{branch.address || "No address"}</small>
+          <small>Phone: {branch.phone || "Not provided"}</small>
+          <small>Opening Hours: {branch.openingHours || "Not provided"}</small>
+          <small>Status: {branch.active ? "Active" : "Inactive"}</small>
+
+          {branch.active && (
+            <>
+              <button
+                type="button"
+                onClick={() => startEditingBranch(branch)}
+              >
+                Edit
+              </button>
+
+              <button
+                type="button"
+                onClick={() => deactivateBranch(branch._id)}
+              >
+                Deactivate
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    ))
+  )}
+</div>
+
+<div className="panel faq-management">
+  <h2>FAQ Management</h2>
+
+  <form onSubmit={saveFaq}>
+    <h3>{editingFaq ? "Update FAQ" : "Add New FAQ"}</h3>
+
+    <input
+      name="question"
+      placeholder="Enter FAQ Question"
+      value={faqForm.question}
+      onChange={handleFaqChange}
+      required
+    />
+
+    <textarea
+      name="answer"
+      placeholder="Enter FAQ Answer"
+      value={faqForm.answer}
+      onChange={handleFaqChange}
+      required
+      rows="4"
+    />
+
+    <button type="submit" disabled={savingFaq}>
+      {savingFaq
+        ? "Saving..."
+        : editingFaq
+        ? "Update FAQ"
+        : "Add FAQ"}
+    </button>
+
+    {editingFaq && (
+      <button type="button" onClick={cancelFaqEditing}>
+        Cancel
+      </button>
+    )}
+  </form>
+
+  <hr />
+
+  <h3>Existing FAQs</h3>
+
+  {faqs.length === 0 ? (
+    <p>No FAQs found.</p>
+  ) : (
+    faqs.map(faq => (
+      <div className="list-row" key={faq._id}>
+        <div>
+          <b>{faq.question}</b>
+          <p>{faq.answer}</p>
+
+          <small>
+            Status: {faq.active ? "Active" : "Inactive"}
+          </small>
+
+          {faq.active && (
+            <>
+              <button
+                type="button"
+                onClick={() => startEditingFaq(faq)}
+              >
+                Edit
+              </button>
+
+              <button
+                type="button"
+                onClick={() => deactivateFaq(faq._id)}
+              >
+                Deactivate
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    ))
+  )}
+</div>
+
+<div className="panel post-management">
+  <h2>Blog / Post Management</h2>
+
+  <form onSubmit={savePost}>
+    <h3>{editingPost ? "Update Post" : "Add New Post"}</h3>
+
+    <input
+      name="title"
+      placeholder="Post Title"
+      value={postForm.title}
+      onChange={handlePostChange}
+      required
+    />
+
+    <input
+      name="slug"
+      placeholder="URL Slug (e.g. benefits-of-blood-tests)"
+      value={postForm.slug}
+      onChange={handlePostChange}
+      required
+    />
+
+    <textarea
+      name="excerpt"
+      placeholder="Short Description"
+      value={postForm.excerpt}
+      onChange={handlePostChange}
+      rows="3"
+    />
+
+    <textarea
+      name="body"
+      placeholder="Write Full Blog Content"
+      value={postForm.body}
+      onChange={handlePostChange}
+      rows="7"
+      required
+    />
+
+    <label>
+      <input
+        type="checkbox"
+        name="published"
+        checked={postForm.published}
+        onChange={handlePostChange}
+      />
+      Publish this post
+    </label>
+
+    <button type="submit" disabled={savingPost}>
+      {savingPost
+        ? "Saving..."
+        : editingPost
+        ? "Update Post"
+        : "Add Post"}
+    </button>
+
+    {editingPost && (
+      <button type="button" onClick={cancelPostEditing}>
+        Cancel
+      </button>
+    )}
+  </form>
+
+  <hr />
+
+  <h3>Existing Posts</h3>
+
+  {posts.length === 0 ? (
+    <p>No posts found.</p>
+  ) : (
+    posts.map(post => (
+      <div className="list-row" key={post._id}>
+        <div>
+          <b>{post.title}</b>
+          <p>{post.excerpt}</p>
+          <small>Slug: {post.slug}</small>
+          <small>
+            Status: {post.published ? "Published" : "Unpublished"}
+          </small>
+
+          <button
+            type="button"
+            onClick={() => startEditingPost(post)}
+          >
+            Edit
+          </button>
+
+          {post.published && (
+            <button
+              type="button"
+              onClick={() => unpublishPost(post._id)}
+            >
+              Unpublish
+            </button>
+          )}
+        </div>
+      </div>
+    ))
+  )}
+</div>
+<div className="panel referral-management">
+  <h2>Doctor-Patient Referral Management</h2>
+
+  <form onSubmit={assignPatient}>
+    <h3>Assign Patient to Doctor</h3>
+
+    <label>Select Doctor</label>
+    <select
+      value={selectedDoctor}
+      onChange={e => setSelectedDoctor(e.target.value)}
+      required
+    >
+      <option value="">Select Doctor</option>
+      {doctors.map(doctor => (
+        <option key={doctor._id} value={doctor._id}>
+          {doctor.name} ({doctor.email})
+        </option>
+      ))}
+    </select>
+
+    <label>Select Patient</label>
+    <select
+      value={selectedPatient}
+      onChange={e => setSelectedPatient(e.target.value)}
+      required
+    >
+      <option value="">Select Patient</option>
+      {referralPatients.map(patient => (
+  <option key={patient._id} value={patient._id}>
+    {patient.name} ({patient.email})
+  </option>
+))}
+    </select>
+
+    <button type="submit" disabled={savingReferral}>
+      {savingReferral ? "Assigning..." : "Assign Patient"}
+    </button>
+  </form>
+
+  <hr />
+
+  <h3>Existing Doctor Referrals</h3>
+
+  {doctors.length === 0 ? (
+    <p>No active doctors found.</p>
+  ) : (
+    doctors.map(doctor => (
+      <div className="list-row" key={doctor._id}>
+        <div>
+          <b>{doctor.name}</b>
+          <small>{doctor.email}</small>
+
+          {doctor.referredPatients?.length === 0 ? (
+            <p>No patients assigned.</p>
+          ) : (
+            doctor.referredPatients?.map(patient => (
+              <div key={patient._id}>
+                <p>
+                  {patient.name} ({patient.email})
+                </p>
+
+                <button
+                  type="button"
+                  onClick={() => removeReferral(doctor._id, patient._id)}
+                >
+                  Remove Referral
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    ))
+  )}
+</div>
+
+
+    </PortalShell>
+  );
+}
+
+
+function Doctor() {
+  const [reports, setReports] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const refreshReports = async () => {
+    try {
+      setLoading(true);
+      setError("");
+
+      const r = await api.get("/doctor/reports");
+      setReports(r.data.reports || []);
+    } catch (err) {
+      setError(err.response?.data?.message || "Could not load referred patient reports.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshReports();
+  }, []);
+
+  const downloadReport = async (report) => {
+    try {
+      const response = await api.get(
+        `/reports/${report._id}/download`,
+        { responseType: "blob" }
+      );
+
+      const url = window.URL.createObjectURL(response.data);
+      const link = document.createElement("a");
+
+      link.href = url;
+      link.download = report.originalName || "lab-report";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      alert("Could not download this report.");
+    }
+  };
+
+  return (
+    <PortalShell title="Referred Patient Reports">
+  <div className="doctor-dashboard">
+      <div className="panel">
+        <h2>Referred Patient Reports</h2>
+
+        <button type="button" onClick={refreshReports}>
+          Refresh Reports
+        </button>
+
+        {loading ? (
+          <p>Loading reports...</p>
+        ) : error ? (
+          <p>{error}</p>
+        ) : reports.length === 0 ? (
+          <p>No reports are currently available for your referred patients.</p>
+        ) : (
+          reports.map(report => (
+            <div className="list-row" key={report._id}>
+              <div>
+                <b>{report.patient?.name || "Patient"}</b>
+                <p>{report.patient?.email}</p>
+                <small>
+                  Booking: {report.booking?.bookingCode || "N/A"}
+                </small>
+                <small>
+                  Report: {report.originalName}
+                </small>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => downloadReport(report)}
+              >
+                Download Report
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+        </div>
+    </PortalShell>
+  );
+}
+
+
+function AIChat() {
+  const { user } = useAuth();
+
+  const [message, setMessage] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const send = async (e) => {
+    e.preventDefault();
+
+    if (!user) {
+      setAnswer("Please log in to use the assistant.");
+      return;
+    }
+
+    if (!message.trim() || loading) return;
+
+    setLoading(true);
+    setAnswer("");
+
+    try {
+      const r = await api.post("/ai/chat", {
+        message: message.trim()
+      });
+
+      setAnswer(r.data.reply || "Please contact the lab for help.");
+      setMessage("");
+    } catch {
+      setAnswer("The assistant is temporarily unavailable. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="chat-widget">
+      <details className="ai-chat">
+        <summary className="ai-chat-header">
+          <MessageCircle size={20} />
+          <span>Ask Anmol AI</span>
+          <span className="ai-status">Online</span>
+        </summary>
+
+        <div className="ai-chat-panel">
+
+          <div className="ai-chat-welcome">
+            <div className="ai-avatar">
+              <MessageCircle size={22} />
+            </div>
+
+            <div>
+              <h3>Anmol Health Care Lab</h3>
+              <p>How can I help you today?</p>
+            </div>
+          </div>
+
+          <div className="ai-chat-content">
+
+            {answer && (
+              <div className="ai-answer-section">
+                <div className="ai-message-label">
+                  Anmol AI
+                </div>
+
+                <div className="ai-answer">
+                  {answer}
+                </div>
+              </div>
+            )}
+
+            {loading && (
+              <div className="ai-loading">
+                <span></span>
+                <span></span>
+                <span></span>
+                <small>Preparing your answer...</small>
+              </div>
+            )}
+
+          </div>
+
+          <form className="ai-chat-form" onSubmit={send}>
+            <textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder="Ask about tests, preparation or booking..."
+              rows={2}
+              maxLength={1000}
+              required
+              disabled={loading}
+            />
+
+            <button
+              type="submit"
+              className="btn btn-primary ai-send-btn"
+              disabled={loading || !message.trim()}
+            >
+              {loading ? "Sending..." : "Send"}
+            </button>
+          </form>
+
+          <p className="ai-disclaimer">
+            This assistant provides general laboratory information,
+            not medical advice.
+          </p>
+
+        </div>
+      </details>
+    </div>
+  );
+}
 function App(){return <AuthProvider><Layout><Routes><Route path="/" element={<Home/>}/><Route path="/about" element={<About/>}/><Route path="/tests" element={<Tests/>}/><Route path="/packages" element={<Packages/>}/><Route path="/home-sampling" element={<HomeSampling/>}/><Route path="/branches" element={<Branches/>}/><Route path="/doctors" element={<Doctors/>}/><Route path="/blog" element={<Blog/>}/><Route path="/faq" element={<FAQ/>}/><Route path="/contact" element={<Contact/>}/><Route path="/login" element={<Login/>}/><Route path="/register" element={<Register/>}/><Route path="/book" element={<Book/>}/><Route path="/portal" element={<PatientPortal/>}/><Route path="/reports" element={<Reports/>}/><Route path="/staff" element={<Staff/>}/><Route path="/admin" element={<Admin/>}/><Route path="/doctor" element={<Doctor/>}/><Route path="/privacy" element={<GenericPage title="Privacy policy"><p>Replace this template with a policy reviewed and approved by the client.</p></GenericPage>}/><Route path="*" element={<GenericPage title="Page not found"><Link to="/" className="btn btn-primary">Return home</Link></GenericPage>}/></Routes><AIChat/></Layout></AuthProvider>}
 export default App;
