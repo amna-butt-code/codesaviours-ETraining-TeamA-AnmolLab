@@ -8,6 +8,7 @@ import { User, Test, LabPackage, Branch, Booking, Report, Message, Post, Faq } f
 import { protect, allowRoles } from "../middleware/auth.js";
 import { reportUpload } from "../middleware/upload.js";
 
+
 const router = Router();
 const cookieOptions = () => ({ httpOnly: true, sameSite: "lax", secure: process.env.COOKIE_SECURE === "true", maxAge: 24 * 60 * 60 * 1000 });
 const makeToken = (user) => jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || "1d" });
@@ -115,6 +116,25 @@ router.post("/reports/:bookingId", protect, allowRoles("admin", "staff"), (req, 
   });
 });
 router.get("/reports/mine", protect, allowRoles("patient"), async (req, res) => res.json({ reports: await Report.find({ patient: req.user._id }).populate("booking", "bookingCode createdAt") }));
+// Doctor: Get reports of referred patients
+
+
+
+router.get("/doctor/reports", protect, allowRoles("doctor"), async (req, res) => {
+  const patientIds = req.user.referredPatients || [];
+
+  const reports = await Report.find({
+    patient: { $in: patientIds }
+  })
+    .populate("patient", "name email")
+    .populate("booking", "bookingCode createdAt")
+    .sort({ createdAt: -1 });
+
+  res.json({ reports });
+});
+
+
+
 router.get("/reports/:id/download", protect, async (req, res) => {
   const report = await Report.findById(req.params.id).populate("booking");
   if (!report) return res.status(404).json({ message: "Report not found" });
@@ -154,6 +174,234 @@ router.delete("/admin/tests/:id", protect, allowRoles("admin"), async (req, res)
   await Test.findByIdAndUpdate(req.params.id, { active: false });
   res.json({ message: "Test deactivated" });
 });
+// Admin package management
+
+router.get("/admin/packages", protect, allowRoles("admin"), async (req, res) => {
+  const packages = await LabPackage.find()
+    .populate("tests", "name code price")
+    .sort({ createdAt: -1 });
+
+  res.json({ packages });
+});
+
+router.post("/admin/packages", protect, allowRoles("admin"), async (req, res) => {
+  const newPackage = await LabPackage.create(req.body);
+  res.status(201).json({ package: newPackage });
+});
+
+router.patch("/admin/packages/:id", protect, allowRoles("admin"), async (req, res) => {
+  const updatedPackage = await LabPackage.findByIdAndUpdate(
+    req.params.id,
+    req.body,
+    { new: true, runValidators: true }
+  );
+
+  if (!updatedPackage) {
+    return res.status(404).json({ message: "Package not found" });
+  }
+
+  res.json({ package: updatedPackage });
+});
+
+router.delete("/admin/packages/:id", protect, allowRoles("admin"), async (req, res) => {
+  const updatedPackage = await LabPackage.findByIdAndUpdate(
+    req.params.id,
+    { active: false },
+    { new: true }
+  );
+
+  if (!updatedPackage) {
+    return res.status(404).json({ message: "Package not found" });
+  }
+
+  res.json({ message: "Package deactivated" });
+});
+// Admin Doctor-Patient Referral Management
+
+// Get all doctors and patients
+router.get("/admin/referrals", protect, allowRoles("admin"), async (req, res) => {
+  const doctors = await User.find({ role: "doctor", active: true })
+    .select("name email referredPatients")
+    .populate("referredPatients", "name email");
+
+ const patients = await User.find({ role: "patient", active: true })
+  .select("name email");
+
+  res.json({ doctors, patients });
+});
+
+// Assign a patient to a doctor
+router.post("/admin/referrals", protect, allowRoles("admin"), async (req, res) => {
+  const { doctorId, patientId } = req.body;
+
+  const doctor = await User.findOne({ _id: doctorId, role: "doctor", active: true });
+  const patient = await User.findOne({ _id: patientId, role: "patient", active: true });
+
+  if (!doctor || !patient) {
+    return res.status(404).json({ message: "Doctor or patient not found." });
+  }
+
+  if (doctor.referredPatients.some(id => id.toString() === patientId)) {
+    return res.status(400).json({ message: "Patient is already assigned to this doctor." });
+  }
+
+  doctor.referredPatients.push(patient._id);
+  await doctor.save();
+
+  res.status(201).json({ message: "Patient assigned successfully." });
+});
+
+// Remove a patient referral
+router.delete("/admin/referrals/:doctorId/:patientId", protect, allowRoles("admin"), async (req, res) => {
+  const doctor = await User.findOne({
+    _id: req.params.doctorId,
+    role: "doctor"
+  });
+
+  if (!doctor) {
+    return res.status(404).json({ message: "Doctor not found." });
+  }
+
+  doctor.referredPatients = doctor.referredPatients.filter(
+    id => id.toString() !== req.params.patientId
+  );
+
+  await doctor.save();
+
+  res.json({ message: "Referral removed successfully." });
+});
+
+// Admin Branch Management
+
+// Get all branches
+router.get("/admin/branches", protect, allowRoles("admin"), async (req, res) => {
+  const branches = await Branch.find().sort({ createdAt: -1 });
+  res.json({ branches });
+});
+
+// Admin FAQ Management
+
+// Get all FAQs
+router.get("/admin/faqs", protect, allowRoles("admin"), async (req, res) => {
+  const faqs = await Faq.find().sort({ createdAt: -1 });
+  res.json({ faqs });
+});
+
+// Add a new FAQ
+router.post("/admin/faqs", protect, allowRoles("admin"), async (req, res) => {
+  const newFaq = await Faq.create(req.body);
+  res.status(201).json({ faq: newFaq });
+});
+
+// Update an FAQ
+router.patch("/admin/faqs/:id", protect, allowRoles("admin"), async (req, res) => {
+  const updatedFaq = await Faq.findByIdAndUpdate(
+    req.params.id,
+    req.body,
+    { new: true, runValidators: true }
+  );
+
+  if (!updatedFaq) {
+    return res.status(404).json({ message: "FAQ not found" });
+  }
+  
+
+  res.json({ faq: updatedFaq });
+});
+
+// Deactivate an FAQ
+router.delete("/admin/faqs/:id", protect, allowRoles("admin"), async (req, res) => {
+  const updatedFaq = await Faq.findByIdAndUpdate(
+    req.params.id,
+    { active: false },
+    { new: true }
+  );
+
+  if (!updatedFaq) {
+    return res.status(404).json({ message: "FAQ not found" });
+  }
+    res.json({ message: "FAQ deactivated successfully" });
+});
+  
+// Admin Post Management
+
+router.get("/admin/posts", protect, allowRoles("admin"), async (req, res) => {
+  const posts = await Post.find().sort({ createdAt: -1 });
+  res.json({ posts });
+});
+
+router.post("/admin/posts", protect, allowRoles("admin"), async (req, res) => {
+  const newPost = await Post.create(req.body);
+  res.status(201).json({ post: newPost });
+});
+
+router.patch("/admin/posts/:id", protect, allowRoles("admin"), async (req, res) => {
+  const updatedPost = await Post.findByIdAndUpdate(
+    req.params.id,
+    req.body,
+    { new: true, runValidators: true }
+  );
+
+  if (!updatedPost) {
+    return res.status(404).json({ message: "Post not found" });
+  }
+
+  res.json({ post: updatedPost });
+});
+
+router.delete("/admin/posts/:id", protect, allowRoles("admin"), async (req, res) => {
+  const updatedPost = await Post.findByIdAndUpdate(
+    req.params.id,
+    { published: false },
+    { new: true }
+  );
+
+  if (!updatedPost) {
+    return res.status(404).json({ message: "Post not found" });
+  }
+
+  res.json({ message: "Post unpublished successfully" });
+});
+
+
+
+
+// Add a new branch
+router.post("/admin/branches", protect, allowRoles("admin"), async (req, res) => {
+  const newBranch = await Branch.create(req.body);
+  res.status(201).json({ branch: newBranch });
+});
+
+// Update a branch
+router.patch("/admin/branches/:id", protect, allowRoles("admin"), async (req, res) => {
+  const updatedBranch = await Branch.findByIdAndUpdate(
+    req.params.id,
+    req.body,
+    { new: true, runValidators: true }
+  );
+
+  if (!updatedBranch) {
+    return res.status(404).json({ message: "Branch not found" });
+  }
+
+  res.json({ branch: updatedBranch });
+});
+
+// Deactivate a branch
+router.delete("/admin/branches/:id", protect, allowRoles("admin"), async (req, res) => {
+  const updatedBranch = await Branch.findByIdAndUpdate(
+    req.params.id,
+    { active: false },
+    { new: true }
+  );
+
+  if (!updatedBranch) {
+    return res.status(404).json({ message: "Branch not found" });
+  }
+
+  res.json({ message: "Branch deactivated successfully" });
+});
+
 router.get("/admin/messages", protect, allowRoles("admin"), async (req, res) => res.json({ messages: await Message.find().sort({ createdAt: -1 }) }));
 router.patch("/admin/messages/:id", protect, allowRoles("admin"), async (req, res) => res.json({ message: await Message.findByIdAndUpdate(req.params.id, { status: req.body.status }, { new: true }) }));
 
@@ -168,7 +416,14 @@ router.post("/ai/chat", protect, async (req, res) => {
       { role: "user", content: prompt }
     ], temperature: 0.2 })
   });
-  if (!response.ok) return res.status(502).json({ message: "AI service temporarily unavailable" });
+ if (!response.ok) {
+  const errorText = await response.text();
+  console.log("GROQ API ERROR:", response.status, errorText);
+
+  return res.status(502).json({
+    message: "AI service temporarily unavailable"
+  });
+}
   const payload = await response.json();
   res.json({ reply: payload.choices?.[0]?.message?.content || "Please contact the lab for help." });
 });
